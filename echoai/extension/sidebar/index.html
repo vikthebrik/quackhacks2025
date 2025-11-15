@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoAI - Media Balance</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>EchoAI</h1>
+      <p class="subtitle">Media Balance & Counterpoints</p>
+    </header>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>Analyzing article...</p>
+    </div>
+
+    <div class="content" id="content" style="display: none;">
+      <!-- Article Metadata -->
+      <section class="section metadata-section">
+        <h2 class="section-title">Article</h2>
+        <div class="metadata">
+          <h3 id="article-title" class="article-title"></h3>
+          <div class="meta-info">
+            <span id="article-author" class="meta-item"></span>
+            <span id="article-domain" class="meta-item domain"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bias Score -->
+      <section class="section bias-section">
+        <h2 class="section-title">Bias Analysis</h2>
+        <div class="bias-container">
+          <div class="bias-spectrum">
+            <div class="spectrum-labels">
+              <span class="label-left">Left</span>
+              <span class="label-center">Neutral</span>
+              <span class="label-right">Right</span>
+            </div>
+            <div class="spectrum-bar">
+              <div class="spectrum-track">
+                <div class="spectrum-indicator" id="bias-indicator"></div>
+              </div>
+            </div>
+            <div class="bias-score">
+              <span id="bias-label" class="bias-label"></span>
+              <span id="bias-score-value" class="bias-score-value"></span>
+            </div>
+            <p id="bias-explanation" class="bias-explanation"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Neutral Summary -->
+      <section class="section summary-section">
+        <h2 class="section-title">Neutral Summary</h2>
+        <div class="summary-content">
+          <p id="neutral-summary" class="summary-text"></p>
+        </div>
+      </section>
+
+      <!-- Opposing Viewpoint -->
+      <section class="section opposing-section">
+        <h2 class="section-title">Opposing Viewpoint</h2>
+        <div class="summary-content">
+          <p id="opposing-viewpoint" class="summary-text"></p>
+        </div>
+      </section>
+
+      <!-- Alternative Articles -->
+      <section class="section alternatives-section">
+        <h2 class="section-title">Alternative Perspectives</h2>
+        <div class="alternatives-content">
+          <p class="alternatives-description">Search for articles with different viewpoints:</p>
+          <div id="search-queries" class="search-queries"></div>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="section settings-section">
+        <h2 class="section-title">Settings</h2>
+        <div class="settings-content">
+          <div class="setting-item">
+            <label for="api-key-input">Gemini API Key:</label>
+            <input type="password" id="api-key-input" placeholder="Enter your API key">
+            <button id="save-api-key" class="btn btn-primary">Save</button>
+          </div>
+          <div class="setting-item">
+            <button id="clear-cache" class="btn btn-secondary">Clear Cache</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="error" id="error" style="display: none;">
+      <p id="error-message"></p>
+      <button id="retry-btn" class="btn btn-primary">Retry</button>
+    </div>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>
+

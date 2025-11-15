@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "EchoAI",
+  "version": "1.0.0",
+  "description": "Escape echo chambers with AI-powered article analysis, bias detection, and counter viewpoints",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidebar/index.html"
+  },
+  "action": {
+    "default_title": "Open EchoAI Sidebar"
+  }
+}
+
