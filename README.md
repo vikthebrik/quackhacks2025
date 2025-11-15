@@ -9,14 +9,14 @@ recommendations**, all from a clean sidebar interface.
 
 ------------------------------------------------------------------------
 
-## 🔍 What Does EchoAI Do?
+## What Does EchoAI Do?
 
 EchoAI promotes media literacy by providing: - Bias spectrum
-visualization\
-- Article summary\
-- Neutral/factual summary\
-- Counter/opposing viewpoint summary\
-- Recommended readings with alternative perspectives\
+visualization
+- Article summary
+- Neutral/factual summary
+- Counter/opposing viewpoint summary
+- Recommended readings with alternative perspectives
 - Token‑efficient AI processing via Gemini
 
 The extension lives in a **Chrome side panel**, ensuring consistent UI
@@ -28,26 +28,26 @@ across all sites.
 
 ### Sidebar UI
 
-A collapsible Chrome side panel showing: - Political/bias score bar\
-- Summary sections\
+A collapsible Chrome side panel showing: - Political/bias score bar
+- Summary sections
 - Alternative article recommendations
 
 ### AI-Powered Analysis
 
-Using Google Gemini: - Summarization\
-- Bias detection\
+Using Google Gemini: - Summarization
+- Bias detection
 - Opposing viewpoint generation
 
 ### Token Cost Optimization
 
--   Local preprocessing\
--   Chunking\
--   Caching\
+-   Local preprocessing
+-   Chunking
+-   Caching
 -   Keyword filtering
 
 ### Alternative Articles
 
-Fetched using Google Search queries such as:\
+Fetched using Google Search queries such as:
 `<topic> opposing viewpoint`
 
 ------------------------------------------------------------------------
@@ -104,8 +104,8 @@ npm install
 
 ### 3. Load the Chrome Extension
 
-1.  Go to chrome://extensions\
-2.  Enable Developer Mode\
+1.  Go to chrome://extensions
+2.  Enable Developer Mode
 3.  Load `extension/` as an unpacked extension
 
 ------------------------------------------------------------------------
@@ -122,26 +122,26 @@ Create a `.env` file:
 
 ### Phase 1 --- Core
 
--   DOM text extraction\
--   UI layout\
+-   DOM text extraction
+-   UI layout
 -   Messaging pipeline
 
 ### Phase 2 --- AI Integration
 
--   Summaries\
--   Counter viewpoints\
+-   Summaries
+-   Counter viewpoints
 -   Bias scoring
 
 ### Phase 3 --- Optimization
 
--   Local preprocessing\
--   Token minimization\
+-   Local preprocessing
+-   Token minimization
 -   Caching
 
 ### Phase 4 --- UX Polish
 
--   Visualization\
--   Article suggestions\
+-   Visualization
+-   Article suggestions
 -   Settings panel
 
 ------------------------------------------------------------------------
