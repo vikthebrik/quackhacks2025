@@ -15,18 +15,23 @@ const articleTitleEl = document.getElementById('article-title');
 const articleAuthorEl = document.getElementById('article-author');
 const articleDomainEl = document.getElementById('article-domain');
 
-// Bias elements
+// Political bias elements
 const biasIndicatorEl = document.getElementById('bias-indicator');
 const biasLabelEl = document.getElementById('bias-label');
 const biasScoreValueEl = document.getElementById('bias-score-value');
 const biasExplanationEl = document.getElementById('bias-explanation');
 
+// Emotional charge elements
+const emotionalIndicatorEl = document.getElementById('emotional-indicator');
+const emotionalLabelEl = document.getElementById('emotional-label');
+const emotionalScoreValueEl = document.getElementById('emotional-score-value');
+
 // Summary elements
 const neutralSummaryEl = document.getElementById('neutral-summary');
 const opposingViewpointEl = document.getElementById('opposing-viewpoint');
 
-// Alternatives elements
-const searchQueriesEl = document.getElementById('search-queries');
+// Opposing articles elements
+const opposingArticlesEl = document.getElementById('opposing-articles');
 
 // Settings elements
 const apiKeyInputEl = document.getElementById('api-key-input');
@@ -36,11 +41,13 @@ const clearCacheBtn = document.getElementById('clear-cache');
 let currentAnalysis = null;
 
 /**
- * Updates the bias visualization
+ * Updates the political leaning visualization
+ * Score: -1 (Conservative) to 1 (Liberal), 0 (Moderate)
+ * Colors: Red = Conservative, Purple = Moderate, Blue = Liberal
  */
 function updateBiasVisualization(bias) {
   const score = bias.score || 0;
-  const label = bias.label || 'Neutral';
+  const label = bias.label || 'Moderate';
   const explanation = bias.explanation || '';
 
   // Update bias indicator position (-1 to 1 maps to 0% to 100%)
@@ -51,20 +58,47 @@ function updateBiasVisualization(bias) {
   biasLabelEl.textContent = label;
   biasScoreValueEl.textContent = score.toFixed(2);
 
-  // Color based on position
+  // Color based on position: Red (Conservative), Purple (Moderate), Blue (Liberal)
   if (score < -0.3) {
-    biasIndicatorEl.className = 'spectrum-indicator left';
+    biasIndicatorEl.className = 'spectrum-indicator conservative';
   } else if (score > 0.3) {
-    biasIndicatorEl.className = 'spectrum-indicator right';
+    biasIndicatorEl.className = 'spectrum-indicator liberal';
   } else {
-    biasIndicatorEl.className = 'spectrum-indicator neutral';
+    biasIndicatorEl.className = 'spectrum-indicator moderate';
   }
 
   // Update explanation
   if (explanation) {
     biasExplanationEl.textContent = explanation;
   } else {
-    biasExplanationEl.textContent = `Bias score: ${score.toFixed(2)} (${label})`;
+    biasExplanationEl.textContent = `Political leaning: ${score.toFixed(2)} (${label})`;
+  }
+}
+
+/**
+ * Updates the emotional charge visualization
+ * Score: -1 (Highly Emotional) to 1 (Analytical/Emotionless), 0 (Neutral)
+ * Colors: Magenta = Highly Emotional, Dark Blue = Neutral, Cyan = Analytical
+ */
+function updateEmotionalVisualization(emotionalCharge) {
+  const score = emotionalCharge.score || 0;
+  const label = emotionalCharge.label || 'Neutral';
+
+  // Update emotional indicator position (-1 to 1 maps to 0% to 100%)
+  const position = ((score + 1) / 2) * 100;
+  emotionalIndicatorEl.style.left = `${position}%`;
+
+  // Update label and score
+  emotionalLabelEl.textContent = label;
+  emotionalScoreValueEl.textContent = score.toFixed(2);
+
+  // Color based on position: Magenta (Emotional), Dark Blue (Neutral), Cyan (Analytical)
+  if (score < -0.3) {
+    emotionalIndicatorEl.className = 'spectrum-indicator emotional';
+  } else if (score > 0.3) {
+    emotionalIndicatorEl.className = 'spectrum-indicator analytical';
+  } else {
+    emotionalIndicatorEl.className = 'spectrum-indicator neutral-emotional';
   }
 }
 
@@ -93,28 +127,44 @@ function updateSummaries(analysis) {
 }
 
 /**
- * Updates the alternative search queries
+ * Updates the opposing articles display
  */
-function updateSearchQueries(queries) {
-  searchQueriesEl.innerHTML = '';
+function updateOpposingArticles(articles) {
+  opposingArticlesEl.innerHTML = '';
   
-  if (!queries || queries.length === 0) {
-    searchQueriesEl.innerHTML = '<p>No search queries available.</p>';
+  if (!articles || articles.length === 0) {
+    opposingArticlesEl.innerHTML = '<p>No opposing articles found.</p>';
     return;
   }
 
-  queries.forEach(query => {
-    const queryEl = document.createElement('div');
-    queryEl.className = 'search-query-item';
+  articles.forEach(article => {
+    const articleEl = document.createElement('div');
+    articleEl.className = 'opposing-article-item';
     
     const linkEl = document.createElement('a');
-    linkEl.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    linkEl.href = article.url;
     linkEl.target = '_blank';
-    linkEl.textContent = query;
-    linkEl.className = 'search-link';
+    linkEl.className = 'opposing-article-link';
     
-    queryEl.appendChild(linkEl);
-    searchQueriesEl.appendChild(queryEl);
+    const titleEl = document.createElement('div');
+    titleEl.className = 'opposing-article-title';
+    titleEl.textContent = article.title || 'Untitled Article';
+    
+    const sourceEl = document.createElement('div');
+    sourceEl.className = 'opposing-article-source';
+    sourceEl.textContent = article.source || 'Unknown Source';
+    
+    if (article.snippet) {
+      const snippetEl = document.createElement('div');
+      snippetEl.className = 'opposing-article-snippet';
+      snippetEl.textContent = article.snippet;
+      linkEl.appendChild(snippetEl);
+    }
+    
+    linkEl.appendChild(titleEl);
+    linkEl.appendChild(sourceEl);
+    articleEl.appendChild(linkEl);
+    opposingArticlesEl.appendChild(articleEl);
   });
 }
 
@@ -126,8 +176,26 @@ function displayAnalysis(analysis) {
   
   updateMetadata(analysis.metadata);
   updateBiasVisualization(analysis.bias);
+  
+  // Update emotional charge if available
+  if (analysis.emotionalCharge) {
+    updateEmotionalVisualization(analysis.emotionalCharge);
+  }
+  
   updateSummaries(analysis);
-  updateSearchQueries(analysis.searchQueries);
+  
+  // Update opposing articles (new) or search queries (legacy)
+  if (analysis.opposingArticles) {
+    updateOpposingArticles(analysis.opposingArticles);
+  } else if (analysis.searchQueries) {
+    // Legacy support
+    updateOpposingArticles(analysis.searchQueries.map(q => ({
+      title: q,
+      url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+      source: 'Google Search',
+      snippet: ''
+    })));
+  }
   
   loadingEl.style.display = 'none';
   errorEl.style.display = 'none';

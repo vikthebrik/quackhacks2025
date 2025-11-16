@@ -17,7 +17,8 @@
     "@google/generative-ai": "^0.21.0",
     "axios": "^1.7.7",
     "webextension-polyfill": "^0.12.0",
-    "compromise": "^14.12.0"
+    "compromise": "^14.12.0",
+    "sentiment": "^5.0.2"
   },
   "devDependencies": {}
 }

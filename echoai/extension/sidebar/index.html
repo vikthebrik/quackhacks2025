@@ -31,18 +31,18 @@
         </div>
       </section>
 
-      <!-- Bias Score -->
+      <!-- Political Leaning Score -->
       <section class="section bias-section">
-        <h2 class="section-title">Bias Analysis</h2>
+        <h2 class="section-title">Political Leaning</h2>
         <div class="bias-container">
           <div class="bias-spectrum">
             <div class="spectrum-labels">
-              <span class="label-left">Left</span>
-              <span class="label-center">Neutral</span>
-              <span class="label-right">Right</span>
+              <span class="label-conservative">Conservative</span>
+              <span class="label-moderate">Moderate</span>
+              <span class="label-liberal">Liberal</span>
             </div>
             <div class="spectrum-bar">
-              <div class="spectrum-track">
+              <div class="spectrum-track political-track">
                 <div class="spectrum-indicator" id="bias-indicator"></div>
               </div>
             </div>
@@ -51,6 +51,29 @@
               <span id="bias-score-value" class="bias-score-value"></span>
             </div>
             <p id="bias-explanation" class="bias-explanation"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Emotional Charge -->
+      <section class="section emotional-section">
+        <h2 class="section-title">Emotional Charge</h2>
+        <div class="emotional-container">
+          <div class="emotional-spectrum">
+            <div class="spectrum-labels">
+              <span class="label-emotional">Emotional</span>
+              <span class="label-neutral-emotional">Neutral</span>
+              <span class="label-analytical">Analytical</span>
+            </div>
+            <div class="spectrum-bar">
+              <div class="spectrum-track emotional-track">
+                <div class="spectrum-indicator" id="emotional-indicator"></div>
+              </div>
+            </div>
+            <div class="emotional-score">
+              <span id="emotional-label" class="emotional-label"></span>
+              <span id="emotional-score-value" class="emotional-score-value"></span>
+            </div>
           </div>
         </div>
       </section>
@@ -73,10 +96,10 @@
 
       <!-- Alternative Articles -->
       <section class="section alternatives-section">
-        <h2 class="section-title">Alternative Perspectives</h2>
+        <h2 class="section-title">Opposing Viewpoints</h2>
         <div class="alternatives-content">
-          <p class="alternatives-description">Search for articles with different viewpoints:</p>
-          <div id="search-queries" class="search-queries"></div>
+          <p class="alternatives-description">Articles with different perspectives:</p>
+          <div id="opposing-articles" class="opposing-articles"></div>
         </div>
       </section>
 
