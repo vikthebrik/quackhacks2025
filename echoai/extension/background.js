@@ -440,7 +440,7 @@ async function generateNeutralSummary(text) {
 
 ${text.substring(0, 4000)}`;
   
-  return await callGeminiAPI(prompt, 200);
+  return await callGeminiAPI(prompt, 1000);
 }
 
 /**
@@ -451,7 +451,7 @@ async function generateOpposingViewpoint(text) {
 
 ${text.substring(0, 4000)}`;
   
-  return await callGeminiAPI(prompt, 200);
+  return await callGeminiAPI(prompt, 1000);
 }
 
 /**
