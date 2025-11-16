@@ -188,9 +188,9 @@ body {
   overflow: hidden;
 }
 
-/* Political track: Red (Conservative) -> Purple (Moderate) -> Blue (Liberal) */
+/* Political track: REVERSED - Blue (Liberal/left) -> Purple (Moderate) -> Red (Conservative/right) */
 .spectrum-track.political-track {
-  background: linear-gradient(to right, #ea667e 0%, #764ba2 50%, #667eea 100%);
+  background: linear-gradient(to right, #667eea 0%, #764ba2 50%, #ea667e 100%);
 }
 
 /* Emotional track: Purple (Emotional) -> Dark Blue (Neutral) -> Green (Analytical) */
@@ -210,7 +210,7 @@ body {
 
 /* Political indicator colors */
 .spectrum-indicator.conservative {
-  background: #ea667e; /* Red */
+  background: #667eea ; /* Red */
 }
 
 .spectrum-indicator.moderate {
@@ -218,7 +218,7 @@ body {
 }
 
 .spectrum-indicator.liberal {
-  background: #667eea; /* Blue */
+  background: #ea667e; /* Blue */
 }
 
 /* Emotional indicator colors */

@@ -42,27 +42,44 @@ let currentAnalysis = null;
 
 /**
  * Updates the political leaning visualization
- * Score: -1 (Conservative) to 1 (Liberal), 0 (Moderate)
- * Colors: Red = Conservative, Purple = Moderate, Blue = Liberal
+ * REVERSED: Score: -1 (Liberal) to 1 (Conservative), 0 (Moderate)
+ * Colors: Blue = Liberal (left), Purple = Moderate (center), Red = Conservative (right)
  */
 function updateBiasVisualization(bias) {
-  const score = bias.score || 0;
+  // Check if analysis failed
+  if (!bias.success && bias.score === null) {
+    biasLabelEl.textContent = 'Analysis Failed';
+    biasScoreValueEl.textContent = 'N/A';
+    biasExplanationEl.textContent = bias.explanation || bias.error || 'Political analysis could not be completed.';
+    biasIndicatorEl.style.display = 'none';
+    return;
+  }
+  
+  biasIndicatorEl.style.display = 'block';
+  const score = bias.score !== null ? bias.score : 0;
   const label = bias.label || 'Moderate';
   const explanation = bias.explanation || '';
 
   // Update bias indicator position (-1 to 1 maps to 0% to 100%)
-  const position = ((score + 1) / 2) * 100;
+  // Score system: -1 = Conservative, 0 = Moderate, 1 = Liberal
+  // Visual: Liberal on left (0%), Conservative on right (100%)
+  // Invert the position: (1 - score) / 2 * 100
+  const position = ((1 - score) / 2) * 100;
   biasIndicatorEl.style.left = `${position}%`;
 
   // Update label and score
   biasLabelEl.textContent = label;
-  biasScoreValueEl.textContent = score.toFixed(2);
+  if (score !== null) {
+    biasScoreValueEl.textContent = score.toFixed(2);
+  } else {
+    biasScoreValueEl.textContent = 'N/A';
+  }
 
-  // Color based on position: Red (Conservative), Purple (Moderate), Blue (Liberal)
+  // Color based on position: Blue (Liberal/left), Purple (Moderate), Red (Conservative/right)
   if (score < -0.3) {
-    biasIndicatorEl.className = 'spectrum-indicator conservative';
-  } else if (score > 0.3) {
     biasIndicatorEl.className = 'spectrum-indicator liberal';
+  } else if (score > 0.3) {
+    biasIndicatorEl.className = 'spectrum-indicator conservative';
   } else {
     biasIndicatorEl.className = 'spectrum-indicator moderate';
   }
@@ -71,17 +88,26 @@ function updateBiasVisualization(bias) {
   if (explanation) {
     biasExplanationEl.textContent = explanation;
   } else {
-    biasExplanationEl.textContent = `Political leaning: ${score.toFixed(2)} (${label})`;
+    biasExplanationEl.textContent = `Political leaning: ${score !== null ? score.toFixed(2) : 'N/A'} (${label})`;
   }
 }
 
 /**
  * Updates the emotional charge visualization
  * Score: -1 (Highly Emotional) to 1 (Analytical/Emotionless), 0 (Neutral)
- * Colors: Magenta = Highly Emotional, Dark Blue = Neutral, Cyan = Analytical
+ * Colors: Purple = Highly Emotional, Dark Blue = Neutral, Green = Analytical
  */
 function updateEmotionalVisualization(emotionalCharge) {
-  const score = emotionalCharge.score || 0;
+  // Check if analysis failed
+  if (!emotionalCharge.success && emotionalCharge.score === null) {
+    emotionalLabelEl.textContent = 'Analysis Failed';
+    emotionalScoreValueEl.textContent = 'N/A';
+    emotionalIndicatorEl.style.display = 'none';
+    return;
+  }
+  
+  emotionalIndicatorEl.style.display = 'block';
+  const score = emotionalCharge.score !== null ? emotionalCharge.score : 0;
   const label = emotionalCharge.label || 'Neutral';
 
   // Update emotional indicator position (-1 to 1 maps to 0% to 100%)
@@ -90,9 +116,13 @@ function updateEmotionalVisualization(emotionalCharge) {
 
   // Update label and score
   emotionalLabelEl.textContent = label;
-  emotionalScoreValueEl.textContent = score.toFixed(2);
+  if (score !== null) {
+    emotionalScoreValueEl.textContent = score.toFixed(2);
+  } else {
+    emotionalScoreValueEl.textContent = 'N/A';
+  }
 
-  // Color based on position: Magenta (Emotional), Dark Blue (Neutral), Cyan (Analytical)
+  // Color based on position: Purple (Emotional), Dark Blue (Neutral), Green (Analytical)
   if (score < -0.3) {
     emotionalIndicatorEl.className = 'spectrum-indicator emotional';
   } else if (score > 0.3) {
@@ -175,16 +205,20 @@ function displayAnalysis(analysis) {
   currentAnalysis = analysis;
   
   updateMetadata(analysis.metadata);
-  updateBiasVisualization(analysis.bias);
   
-  // Update emotional charge if available
+  // Always update bias visualization (will show error if failed)
+  if (analysis.bias) {
+    updateBiasVisualization(analysis.bias);
+  }
+  
+  // Always update emotional charge (will show error if failed)
   if (analysis.emotionalCharge) {
     updateEmotionalVisualization(analysis.emotionalCharge);
   }
   
   updateSummaries(analysis);
   
-  // Update opposing articles (new) or search queries (legacy)
+  // Update opposing articles
   if (analysis.opposingArticles) {
     updateOpposingArticles(analysis.opposingArticles);
   } else if (analysis.searchQueries) {
@@ -195,6 +229,31 @@ function displayAnalysis(analysis) {
       source: 'Google Search',
       snippet: ''
     })));
+  }
+  
+  // Show errors if any (remove any existing error sections first to prevent duplicates)
+  const content = document.getElementById('content');
+  const existingErrors = content.querySelectorAll('.analysis-errors');
+  existingErrors.forEach(el => el.remove());
+  
+  if (analysis.errors && analysis.errors.length > 0) {
+    // Display single consolidated error message
+    const errorSection = document.createElement('div');
+    errorSection.className = 'analysis-errors';
+    errorSection.style.cssText = 'padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; margin: 10px 0;';
+    
+    // Consolidate unique errors
+    const uniqueErrors = [...new Set(analysis.errors)];
+    const errorMessage = uniqueErrors.length === 1 
+      ? uniqueErrors[0]
+      : `Some analyses could not be completed: ${uniqueErrors.join('; ')}`;
+    
+    errorSection.innerHTML = `<strong>Analysis Warning:</strong> ${errorMessage}`;
+    
+    // Insert at top of content
+    if (content && content.firstChild) {
+      content.insertBefore(errorSection, content.firstChild);
+    }
   }
   
   loadingEl.style.display = 'none';
