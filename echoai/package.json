@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Chrome extension for highlighting political bias in articles",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -14,12 +15,12 @@
   "author": "EchoAI Team",
   "license": "MIT",
   "dependencies": {
+    "@google/genai": "^1.29.1",
     "@google/generative-ai": "^0.21.0",
     "axios": "^1.7.7",
-    "webextension-polyfill": "^0.12.0",
     "compromise": "^14.12.0",
-    "sentiment": "^5.0.2"
-  },
-  "devDependencies": {}
+    "dotenv": "^17.2.3",
+    "sentiment": "^5.0.2",
+    "webextension-polyfill": "^0.12.0"
+  }
 }
-

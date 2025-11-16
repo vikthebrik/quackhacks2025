@@ -225,7 +225,7 @@ function displayAnalysis(analysis) {
     // Legacy support
     updateOpposingArticles(analysis.searchQueries.map(q => ({
       title: q,
-      url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+      url: `https.google.com/search?q=${encodeURIComponent(q)}`,
       source: 'Google Search',
       snippet: ''
     })));
@@ -236,17 +236,16 @@ function displayAnalysis(analysis) {
   const existingErrors = content.querySelectorAll('.analysis-errors');
   existingErrors.forEach(el => el.remove());
   
-  if (analysis.errors && analysis.errors.length > 0) {
-    // Display single consolidated error message
+  // This handles partial errors from the background script
+  if (analysis.error) {
     const errorSection = document.createElement('div');
     errorSection.className = 'analysis-errors';
     errorSection.style.cssText = 'padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; margin: 10px 0;';
     
-    // Consolidate unique errors
-    const uniqueErrors = [...new Set(analysis.errors)];
-    const errorMessage = uniqueErrors.length === 1 
-      ? uniqueErrors[0]
-      : `Some analyses could not be completed: ${uniqueErrors.join('; ')}`;
+    let errorMessage = analysis.error;
+    if (errorMessage.includes('API key')) {
+        errorMessage = 'Analysis failed. Please check your API key configuration.'
+    }
     
     errorSection.innerHTML = `<strong>Analysis Warning:</strong> ${errorMessage}`;
     
@@ -297,7 +296,11 @@ async function requestAnalysis() {
     // Send message to content script to extract article
     chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_ARTICLE' }, (response) => {
       if (chrome.runtime.lastError) {
-        showError('Could not connect to page. Please refresh and try again.');
+        let errorMessage = chrome.runtime.lastError.message;
+        if (errorMessage.includes('Receiving end does not exist')) {
+            errorMessage = 'Could not connect to page. Please refresh the tab and try again.';
+        }
+        showError(errorMessage);
         return;
       }
 
@@ -307,7 +310,8 @@ async function requestAnalysis() {
         // via the message listener below.
         // Poll for results (with timeout)
         let attempts = 0;
-        const maxAttempts = 30; // 15 seconds max wait
+        // THE ONLY CHANGE IS HERE: Increased maxAttempts from 30 to 120
+        const maxAttempts = 120; // 60 seconds max wait (was 15)
         
         const checkForAnalysis = setInterval(() => {
           attempts++;
@@ -359,17 +363,33 @@ async function saveApiKey() {
     return;
   }
 
+  saveApiKeyBtn.textContent = 'Saving...';
+  saveApiKeyBtn.disabled = true;
+
+  // Test the key first
   chrome.runtime.sendMessage(
-    { type: 'SET_API_KEY', apiKey: apiKey },
-    (response) => {
-      if (response && response.success) {
-        alert('API key saved successfully!');
-        // Retry analysis if we have one
-        if (currentAnalysis) {
-          requestAnalysis();
-        }
+    { type: 'TEST_API_KEY', apiKey: apiKey },
+    (testResult) => {
+      if (testResult && testResult.success) {
+        // If test is successful, then set it
+        chrome.runtime.sendMessage(
+          { type: 'SET_API_KEY', apiKey: apiKey },
+          (response) => {
+            saveApiKeyBtn.textContent = 'Save';
+            saveApiKeyBtn.disabled = false;
+            if (response && response.success) {
+              alert('API key saved successfully!');
+              // Retry analysis
+              requestAnalysis();
+            } else {
+              alert('Failed to save API key');
+            }
+          }
+        );
       } else {
-        alert('Failed to save API key');
+        saveApiKeyBtn.textContent = 'Save';
+        saveApiKeyBtn.disabled = false;
+        alert(`API Key Test Failed: ${testResult.error}`);
       }
     }
   );
@@ -412,9 +432,9 @@ requestAnalysis();
 
 // Auto-refresh when tab changes
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete') {
-    // Small delay to ensure content script has run
+  // Only refresh if the *active* tab is the one that finished loading
+  if (changeInfo.status === 'complete' && tab.active) {
+    // Small delay to ensure content script is fully injected and page is ready
     setTimeout(requestAnalysis, 1000);
   }
 });
-

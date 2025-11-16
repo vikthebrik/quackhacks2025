@@ -126,30 +126,27 @@ function getBiasLabel(score) {
   return getPoliticalLabel(score);
 }
 
-// Note: In a real implementation, you'd load the Gemini SDK
-// For now, we'll use fetch API to call Gemini REST API
-// You'll need to configure the API key via storage or environment
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
-
-let geminiApiKey = null;
-
-// Load API key from storage
-chrome.storage.local.get(['geminiApiKey'], (result) => {
-  geminiApiKey = result.geminiApiKey;
-});
-
-// Listen for API key updates
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (changes.geminiApiKey) {
-    geminiApiKey = changes.geminiApiKey.newValue;
+/**
+ * Helper function to securely get the API key from storage
+ */
+async function getApiKey() {
+  try {
+    const result = await chrome.storage.local.get('geminiApiKey');
+    return result.geminiApiKey; // This will be the key or undefined
+  } catch (e) {
+    console.error('Error retrieving API key:', e);
+    return null;
   }
-});
+}
 
 /**
  * Calls Gemini API to generate content
  */
 async function callGeminiAPI(prompt, maxTokens = 1000) {
+  const geminiApiKey = await getApiKey();
+  
   if (!geminiApiKey) {
     throw new Error('Gemini API key not configured');
   }
@@ -182,7 +179,120 @@ async function callGeminiAPI(prompt, maxTokens = 1000) {
   }
 
   const data = await response.json();
+
+  // *** DEBUGGING LINE ADDED ***
+  console.log('Full API Response:', JSON.stringify(data, null, 2));
+
+  // Add safety check for the *full* response structure
+  if (!data.candidates || 
+      data.candidates.length === 0 || 
+      !data.candidates[0].content || 
+      !data.candidates[0].content.parts || 
+      data.candidates[0].content.parts.length === 0) {
+        
+    // Check for finishReason to provide better error
+    if (data.candidates && data.candidates[0] && data.candidates[0].finishReason === 'SAFETY') {
+      throw new Error('Gemini API error: Response blocked due to safety settings.');
+    }
+    // Check for prompt feedback
+    if (data.promptFeedback && data.promptFeedback.blockReason) {
+        throw new Error(`Gemini API error: Prompt blocked due to ${data.promptFeedback.blockReason}`);
+    }
+    throw new Error('Gemini API error: Received an invalid or empty response structure.');
+  }
+
   return data.candidates[0].content.parts[0].text;
+}
+
+/**
+ * Tests the API key by sending a simple test query
+ * Returns true if the API key is valid, false otherwise
+ */
+async function testApiKey(apiKey) {
+  let keyToTest = apiKey;
+
+  if (!keyToTest) {
+    // Try to load from storage if no API key provided
+    keyToTest = await getApiKey();
+  }
+  
+  if (!keyToTest) {
+    return { success: false, error: 'API key is empty' };
+  }
+
+  const url = `${GEMINI_API_URL}?key=${keyToTest}`;
+  const testPrompt = 'Say "API connection successful" if you can read this.';
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: testPrompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 50,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = 'API key is not valid';
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.error?.message || errorMessage;
+      } catch (e) {
+        // If error is not JSON, use the text as is
+        errorMessage = errorText || errorMessage;
+      }
+      
+      return { success: false, error: errorMessage };
+    }
+
+    const data = await response.json();
+    
+    // Check if we got a valid response
+    if (data.candidates && data.candidates.length > 0 && 
+        data.candidates[0].content && 
+        data.candidates[0].content.parts && 
+        data.candidates[0].content.parts.length > 0 &&
+        data.candidates[0].content.parts[0].text) {
+      const responseText = data.candidates[0].content.parts[0].text;
+      // If we get any text response, the API key is working
+      return { 
+        success: true, 
+        message: 'API key connected successfully',
+        testResponse: responseText.trim()
+      };
+    } else {
+      // Handle cases where the response is valid but empty (e.g., safety block)
+      if (data.promptFeedback && data.promptFeedback.blockReason) {
+         return { 
+            success: false, 
+            error: `API key is valid, but test prompt was blocked: ${data.promptFeedback.blockReason}` 
+         };
+      }
+      return { 
+        success: false, 
+        error: 'Invalid response from API. Please check your API key.' 
+      };
+    }
+  } catch (error) {
+    return { 
+      success: false, 
+      error: `Connection error: ${error.message}` 
+    };
+  }
 }
 
 /**
@@ -208,540 +318,105 @@ ${text.substring(0, 4000)}`;
 }
 
 /**
- * Vector 1: Domain-based bias analysis
- * Returns score: -1 (Conservative) to 1 (Liberal), 0 (Moderate)
- */
-async function analyzeDomainBias(metadata) {
-  const domainBiasMap = {
-    // Conservative/Right-leaning (negative scores)
-    'foxnews.com': -0.8,
-    'breitbart.com': -0.9,
-    'dailywire.com': -0.7,
-    'nypost.com': -0.5,
-    'wsj.com': -0.4,
-    'nationalreview.com': -0.8,
-    'townhall.com': -0.7,
-    'washingtonexaminer.com': -0.6,
-    'theblaze.com': -0.8,
-    'redstate.com': -0.7,
-    'thefederalist.com': -0.7,
-    
-    // Liberal/Left-leaning (positive scores)
-    'cnn.com': 0.7,
-    'msnbc.com': 0.8,
-    'nytimes.com': 0.6,
-    'washingtonpost.com': 0.6,
-    'theguardian.com': 0.7,
-    'huffpost.com': 0.8,
-    'vox.com': 0.7,
-    'slate.com': 0.6,
-    'motherjones.com': 0.8,
-    'thedailybeast.com': 0.7,
-    'salon.com': 0.7,
-    'thinkprogress.org': 0.8,
-    
-    // Moderate/Center
-    'bbc.com': 0.0,
-    'reuters.com': 0.0,
-    'ap.org': 0.0,
-    'npr.org': 0.1,
-    'pbs.org': 0.0,
-    'economist.com': 0.0,
-    'bloomberg.com': 0.0,
-    'politico.com': 0.0
-  };
-  
-  const domainPatterns = [
-    { pattern: /^fox\d+[a-z]*\.com$/i, score: -0.7, label: 'Fox Affiliate' },
-    { pattern: /\.foxnews\.com$/i, score: -0.8, label: 'Fox News' },
-    { pattern: /fox[a-z]*\.com$/i, score: -0.7, label: 'Fox Network' },
-    { pattern: /^cnn\.com$/i, score: 0.7, label: 'CNN' },
-    { pattern: /\.cnn\.com$/i, score: 0.7, label: 'CNN Affiliate' },
-    { pattern: /^[a-z]+news\.com$/i, score: 0.0, label: 'Local News' },
-    { pattern: /^[a-z]+herald\.com$/i, score: 0.0, label: 'Local Herald' },
-    { pattern: /^[a-z]+times\.com$/i, score: 0.0, label: 'Local Times' },
-    { pattern: /^[a-z]+tribune\.com$/i, score: 0.0, label: 'Local Tribune' },
-    { pattern: /\.edu$/i, score: 0.0, label: 'Educational' },
-    { pattern: /\.gov$/i, score: 0.0, label: 'Government' }
-  ];
-  
-  const domain = (metadata.domain || '').toLowerCase().replace(/^www\./, '');
-  let domainScore = domainBiasMap[domain];
-  let matchedLabel = null;
-  
-  if (domainScore === undefined) {
-    for (const { pattern, score, label } of domainPatterns) {
-      if (pattern.test(domain)) {
-        domainScore = score;
-        matchedLabel = label;
-        break;
-      }
-    }
-  }
-  
-  if (domainScore === undefined) {
-    if (domain.includes('fox')) {
-      domainScore = -0.7;
-      matchedLabel = 'Fox Network Affiliate';
-    } else if (domain.includes('cnn') || domain.includes('msnbc')) {
-      domainScore = 0.7;
-      matchedLabel = 'CNN/MSNBC Affiliate';
-    } else if (domain.includes('abc') || domain.includes('cbs') || domain.includes('nbc')) {
-      domainScore = 0.0;
-      matchedLabel = 'Major Network Affiliate';
-    }
-  }
-  
-  if (domainScore !== undefined) {
-    return {
-      score: domainScore,
-      confidence: 0.9,
-      source: 'domain',
-      explanation: `Domain analysis: ${metadata.domain}${matchedLabel ? ` (${matchedLabel})` : ''}`
-    };
-  }
-  
-  throw new Error('Domain not recognized');
-}
-
-/**
- * Vector 2: Content keyword analysis
- * Analyzes political keywords and phrases in article text
- */
-function analyzeContentKeywords(text) {
-  if (!text || text.length < 100) {
-    throw new Error('Text too short for content analysis');
-  }
-  
-  const conservativeKeywords = {
-    'free market': 0.8, 'deregulation': 0.7, 'tax cuts': 0.6, 'small government': 0.8,
-    'constitutional rights': 0.7, 'second amendment': 0.9, 'pro-life': 0.8,
-    'traditional values': 0.7, 'family values': 0.6, 'religious freedom': 0.7,
-    'border security': 0.8, 'illegal immigration': 0.7, 'law and order': 0.7,
-    'fiscal responsibility': 0.6, 'deficit reduction': 0.6, 'deregulate': 0.7,
-    'big government': 0.7, 'government overreach': 0.8, 'welfare state': 0.6,
-    'entitlement programs': 0.5, 'socialism': 0.9, 'communism': 0.9,
-    'mainstream media': 0.6, 'fake news': 0.7, 'deep state': 0.8,
-    'republican party': 0.5, 'gop': 0.5, 'conservative': 0.6,
-    'trump': 0.4, 'reagan': 0.3, 'mcconnell': 0.3
-  };
-  
-  const liberalKeywords = {
-    'social justice': 0.8, 'climate action': 0.7, 'renewable energy': 0.6,
-    'universal healthcare': 0.8, 'medicare for all': 0.9, 'single payer': 0.8,
-    'gun control': 0.7, 'gun reform': 0.7, 'assault weapons ban': 0.8,
-    'pro-choice': 0.8, 'reproductive rights': 0.8, 'lgbtq rights': 0.7,
-    'immigration reform': 0.6, 'pathway to citizenship': 0.7, 'daca': 0.6,
-    'minimum wage': 0.6, 'workers rights': 0.6, 'union': 0.5,
-    'affordable housing': 0.6, 'income inequality': 0.7, 'wealth tax': 0.7,
-    'systemic racism': 0.8, 'white privilege': 0.8, 'systemic oppression': 0.8,
-    'patriarchy': 0.7, 'diversity and inclusion': 0.6, 'equity': 0.7,
-    'progressive': 0.6, 'democratic party': 0.4, 'democrats': 0.4,
-    'biden': 0.3, 'sanders': 0.5, 'aoc': 0.5, 'warren': 0.4
-  };
-  
-  const lowerText = text.toLowerCase();
-  let conservativeScore = 0;
-  let liberalScore = 0;
-  const foundKeywords = [];
-  
-  Object.entries(conservativeKeywords).forEach(([keyword, weight]) => {
-    const regex = new RegExp(`\\b${keyword.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-    const matches = (lowerText.match(regex) || []).length;
-    if (matches > 0) {
-      conservativeScore += matches * weight;
-      foundKeywords.push({ keyword, weight, matches, type: 'conservative' });
-    }
-  });
-  
-  Object.entries(liberalKeywords).forEach(([keyword, weight]) => {
-    const regex = new RegExp(`\\b${keyword.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-    const matches = (lowerText.match(regex) || []).length;
-    if (matches > 0) {
-      liberalScore += matches * weight;
-      foundKeywords.push({ keyword, weight, matches, type: 'liberal' });
-    }
-  });
-  
-  const totalScore = conservativeScore + liberalScore;
-  
-  // Return neutral score if no keywords found instead of throwing error
-  if (totalScore === 0) {
-    return {
-      score: 0.0,
-      confidence: 0.1,
-      source: 'content',
-      explanation: 'Content analysis: No political keywords found (neutral score)',
-      details: []
-    };
-  }
-  
-  // Score: negative = conservative, positive = liberal
-  const rawScore = (liberalScore - conservativeScore) / totalScore;
-  const normalizedScore = Math.max(-1, Math.min(1, rawScore));
-  const confidence = Math.min(totalScore / 20, 0.8);
-  
-  return {
-    score: normalizedScore,
-    confidence: confidence,
-    source: 'content',
-    explanation: `Content analysis: Found ${foundKeywords.length} political indicators`,
-    details: foundKeywords.slice(0, 5)
-  };
-}
-
-/**
- * Vector 3: GDELT tone analysis
- */
-async function analyzeGDELTTone(text, metadata) {
-  const queries = [
-    metadata.title,
-    metadata.url ? new URL(metadata.url).pathname.split('/').filter(p => p.length > 5).join(' ') : null,
-    text.substring(0, 150).replace(/[^\w\s]/g, ' ').trim()
-  ].filter(q => q && q.length > 10);
-  
-  console.log('GDELT: Starting analysis with queries:', queries);
-  
-  for (let i = 0; i < queries.length; i++) {
-    const queryText = queries[i];
-    
-    // Add small delay between queries to avoid rate limiting
-    if (i > 0) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    
-    try {
-      const query = encodeURIComponent(queryText);
-      const gdeltUrl = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=artlist&format=json&maxrecords=3`;
-      
-      console.log('GDELT: Fetching URL:', gdeltUrl);
-      const response = await fetch(gdeltUrl);
-      
-      console.log('GDELT: Response status:', response.status, response.statusText);
-      
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unable to read error');
-        console.error('GDELT: Error response:', errorText);
-        continue;
-      }
-      
-      const data = await response.json();
-      console.log('GDELT: Response data structure:', Object.keys(data));
-      
-      // Handle different possible response structures
-      const articles = data.articles || data.results || data.data || [];
-      
-      if (Array.isArray(articles) && articles.length > 0) {
-        console.log('GDELT: Found', articles.length, 'articles');
-        
-        let totalTone = 0;
-        let count = 0;
-        
-        articles.forEach((article, idx) => {
-          console.log(`GDELT: Article ${idx + 1} structure:`, Object.keys(article));
-          
-          // GDELT tone can be in different fields
-          const tone = article.tone || article.avgtone || article.tone_score || null;
-          
-          if (tone !== undefined && tone !== null && !isNaN(tone)) {
-            console.log(`GDELT: Article ${idx + 1} tone:`, tone);
-            totalTone += parseFloat(tone);
-            count++;
-          }
-        });
-        
-        if (count > 0) {
-          const avgTone = totalTone / count;
-          console.log('GDELT: Average tone:', avgTone);
-          
-          // GDELT tone: -100 to +100, map to -1 to +1
-          const score = Math.max(-1, Math.min(1, avgTone / 100));
-          
-          return {
-            score: score,
-            confidence: 0.6,
-            source: 'gdelt',
-            explanation: `GDELT tone analysis (${count} article${count > 1 ? 's' : ''} analyzed)`
-          };
-        } else {
-          console.log('GDELT: No valid tone data found in articles');
-        }
-      } else {
-        console.log('GDELT: No articles found in response');
-      }
-    } catch (error) {
-      console.error('GDELT: Fetch error:', error);
-      continue;
-    }
-  }
-  
-  // Return neutral score instead of throwing error
-  console.log('GDELT: All queries failed, returning neutral score');
-  return {
-    score: 0.0,
-    confidence: 0.1,
-    source: 'gdelt',
-    explanation: 'GDELT API returned no results (neutral score)'
-  };
-}
-
-/**
- * Vector 4: Language pattern analysis
- * Analyzes linguistic patterns that indicate political framing
- */
-function analyzeLanguagePatterns(text) {
-  if (!text || text.length < 100) {
-    throw new Error('Text too short for language analysis');
-  }
-  
-  const lowerText = text.toLowerCase();
-  
-  const conservativePatterns = {
-    'clearly': 0.3, 'obviously': 0.3, 'undoubtedly': 0.4, 'certainly': 0.2,
-    'everyone knows': 0.4, 'no one can deny': 0.5,
-    'personal responsibility': 0.6, 'pull yourself up': 0.5, 'self-reliance': 0.5,
-    'time-tested': 0.4, 'proven': 0.3, 'traditional': 0.4
-  };
-  
-  const liberalPatterns = {
-    'systemic': 0.5, 'institutional': 0.4, 'structural': 0.4,
-    'privilege': 0.5, 'marginalized': 0.5, 'oppressed': 0.5,
-    'community': 0.3, 'solidarity': 0.5, 'collective': 0.4,
-    'together we': 0.4, 'we must': 0.3,
-    'forward-thinking': 0.4, 'innovative': 0.3, 'progressive': 0.5
-  };
-  
-  let conservativeCount = 0;
-  let liberalCount = 0;
-  
-  Object.entries(conservativePatterns).forEach(([pattern, weight]) => {
-    const regex = new RegExp(`\\b${pattern.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-    const matches = (lowerText.match(regex) || []).length;
-    conservativeCount += matches * weight;
-  });
-  
-  Object.entries(liberalPatterns).forEach(([pattern, weight]) => {
-    const regex = new RegExp(`\\b${pattern.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-    const matches = (lowerText.match(regex) || []).length;
-    liberalCount += matches * weight;
-  });
-  
-  const total = conservativeCount + liberalCount;
-  
-  // Return neutral score if no patterns found instead of throwing error
-  if (total === 0) {
-    return {
-      score: 0.0,
-      confidence: 0.1,
-      source: 'language',
-      explanation: 'Language pattern analysis: No patterns detected (neutral score)'
-    };
-  }
-  
-  const score = (liberalCount - conservativeCount) / total;
-  const normalizedScore = Math.max(-1, Math.min(1, score));
-  const confidence = Math.min(total / 10, 0.5);
-  
-  return {
-    score: normalizedScore,
-    confidence: confidence,
-    source: 'language',
-    explanation: `Language pattern analysis: ${total.toFixed(1)} pattern matches`
-  };
-}
-
-/**
- * Vector 5: Framing technique analysis
- * Detects bias through framing techniques
- */
-function analyzeFramingTechniques(text) {
-  if (!text || text.length < 100) {
-    throw new Error('Text too short for framing analysis');
-  }
-  
-  const lowerText = text.toLowerCase();
-  
-  const hasEmotionalFraming = /(outrage|scandal|crisis|disaster)/i.test(lowerText);
-  const hasVictimFraming = /(victim|vulnerable|at risk)/i.test(lowerText);
-  const hasUsVsThem = /(they want|they are|the left|the right)/i.test(lowerText);
-  const hasQuestionFraming = /(why would|how could)/i.test(lowerText);
-  
-  let framingScore = 0;
-  let totalFraming = 0;
-  
-  // Emotional + Us vs Them = slightly conservative
-  if (hasEmotionalFraming && hasUsVsThem) {
-    framingScore = -0.3;
-    totalFraming = 1;
-  } 
-  // Victim framing = slightly liberal
-  else if (hasVictimFraming) {
-    framingScore = 0.2;
-    totalFraming = 1;
-  }
-  // Question framing = neutral but indicates opinion
-  else if (hasQuestionFraming) {
-    framingScore = 0.0;
-    totalFraming = 0.5;
-  }
-  
-  // Return neutral score if no framing detected instead of throwing error
-  if (totalFraming === 0) {
-    return {
-      score: 0.0,
-      confidence: 0.1,
-      source: 'framing',
-      explanation: 'Framing technique analysis: No clear framing detected (neutral score)'
-    };
-  }
-  
-  return {
-    score: framingScore,
-    confidence: 0.3,
-    source: 'framing',
-    explanation: 'Framing technique analysis'
-  };
-}
-
-/**
- * Combines multiple vectors with weighted averaging
- */
-function combineVectors(vectors, weights) {
-  let weightedSum = 0;
-  let totalWeight = 0;
-  const activeVectors = [];
-  const explanations = [];
-  
-  Object.entries(vectors).forEach(([vectorName, vectorData]) => {
-    if (vectorData && vectorData.score !== null && vectorData.score !== undefined) {
-      const weight = weights[vectorName] || 0;
-      const confidence = vectorData.confidence || 0.5;
-      
-      const adjustedWeight = weight * confidence;
-      weightedSum += vectorData.score * adjustedWeight;
-      totalWeight += adjustedWeight;
-      
-      activeVectors.push(vectorName);
-      if (vectorData.explanation) {
-        explanations.push(`${vectorName}: ${vectorData.explanation}`);
-      }
-    }
-  });
-  
-  if (totalWeight === 0) {
-    throw new Error('No vectors available for analysis');
-  }
-  
-  const finalScore = weightedSum / totalWeight;
-  const normalizedScore = Math.max(-1, Math.min(1, finalScore));
-  
-  const vectorCount = activeVectors.length;
-  const baseConfidence = Math.min(vectorCount / 5, 0.9);
-  
-  return {
-    score: normalizedScore,
-    label: getPoliticalLabel(normalizedScore),
-    confidence: baseConfidence,
-    source: 'multi-vector',
-    explanation: `Multi-vector analysis using ${vectorCount} indicator${vectorCount > 1 ? 's' : ''}: ${activeVectors.join(', ')}`,
-    details: {
-      vectors: activeVectors,
-      explanations: explanations,
-      individualScores: Object.fromEntries(
-        activeVectors.map(v => [v, vectors[v].score])
-      )
-    },
-    success: true
-  };
-}
-
-/**
- * Multi-vector political leaning analysis
- * Combines multiple indicators for more accurate scoring
- */
-async function analyzeBiasMultiVector(text, metadata) {
-  const vectors = {
-    domain: null,
-    content: null,
-    gdelt: null,
-    language: null,
-    framing: null
-  };
-  
-  const weights = {
-    domain: 0.35,
-    content: 0.25,
-    gdelt: 0.20,
-    language: 0.12,
-    framing: 0.08
-  };
-  
-  // Run all vector analyses (domain and GDELT are async)
-  try {
-    vectors.domain = await analyzeDomainBias(metadata);
-  } catch (error) {
-    console.log('Domain analysis failed:', error);
-  }
-  
-  try {
-    vectors.content = analyzeContentKeywords(text);
-  } catch (error) {
-    console.log('Content analysis failed:', error);
-  }
-  
-  try {
-    vectors.gdelt = await analyzeGDELTTone(text, metadata);
-  } catch (error) {
-    console.error('GDELT analysis failed:', error);
-    // GDELT now returns neutral score instead of throwing, but keep catch for safety
-    vectors.gdelt = {
-      score: 0.0,
-      confidence: 0.1,
-      source: 'gdelt',
-      explanation: `GDELT analysis error: ${error.message}`
-    };
-  }
-  
-  try {
-    vectors.language = analyzeLanguagePatterns(text);
-  } catch (error) {
-    console.log('Language analysis failed:', error);
-  }
-  
-  try {
-    vectors.framing = analyzeFramingTechniques(text);
-  } catch (error) {
-    console.log('Framing analysis failed:', error);
-  }
-  
-  // Combine vectors with weighted average
-  return combineVectors(vectors, weights);
-}
-
-/**
- * Analyzes political bias using GDELT API (now uses multi-vector approach)
+ * Analyzes political bias using GDELT API
  * Returns score: -1 (Conservative/Right) to 1 (Liberal/Left), 0 (Moderate)
  */
 async function analyzeBiasGDELT(text, metadata) {
   try {
-    // Use multi-vector analysis for more accurate results
-    return await analyzeBiasMultiVector(text, metadata);
-  } catch (error) {
-    console.error('Error in multi-vector analysis:', error);
-    // If multi-vector fails completely, try domain-only as last resort
-    try {
-      const domainResult = await analyzeDomainBias(metadata);
+    // GDELT 2.0 API - using domain-based analysis
+    // Since GDELT requires specific queries, we'll use domain analysis
+    // combined with text analysis for better accuracy
+    
+    // Known political leaning database (can be expanded)
+    const domainBiasMap = {
+      // Conservative/Right-leaning
+      'foxnews.com': -0.8,
+      'breitbart.com': -0.9,
+      'dailywire.com': -0.7,
+      'nypost.com': -0.5,
+      'wsj.com': -0.4,
+      'nationalreview.com': -0.8,
+      
+      // Liberal/Left-leaning
+      'cnn.com': 0.7,
+      'msnbc.com': 0.8,
+      'nytimes.com': 0.6,
+      'washingtonpost.com': 0.6,
+      'theguardian.com': 0.7,
+      'huffpost.com': 0.8,
+      'vox.com': 0.7,
+      'slate.com': 0.6,
+      
+      // Moderate/Center
+      'bbc.com': 0.0,
+      'reuters.com': 0.0,
+      'ap.org': 0.0,
+      'npr.org': 0.1,
+      'pbs.org': 0.0,
+      'economist.com': 0.0
+    };
+    
+    // Check domain first
+    const domain = metadata.domain || '';
+    const domainScore = domainBiasMap[domain.toLowerCase()];
+    
+    if (domainScore !== undefined) {
       return {
-        score: domainResult.score,
-        label: getPoliticalLabel(domainResult.score),
-        explanation: domainResult.explanation,
-        source: domainResult.source,
-        success: true
+        score: domainScore,
+        label: getPoliticalLabel(domainScore),
+        explanation: `Political analysis based on source domain: ${domain}`,
+        source: 'domain'
       };
-    } catch (domainError) {
-      // Final fallback: throw error (no heuristics)
-      throw new Error(`Political analysis failed: ${error.message}`);
     }
+    
+    // Fallback: Use GDELT tone API if available
+    // GDELT tone ranges from -100 (negative) to +100 (positive)
+    // We'll map this to political spectrum as a proxy
+    try {
+      const query = encodeURIComponent(metadata.title || text.substring(0, 100));
+      const gdeltUrl = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=artlist&format=json&maxrecords=1`;
+      
+      const response = await fetch(gdeltUrl);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.articles && data.articles.length > 0) {
+          const article = data.articles[0];
+          // GDELT provides tone, map to political spectrum
+          // This is a simplified mapping
+          const tone = article.tone || 0;
+          const score = Math.max(-1, Math.min(1, tone / 100));
+          
+          return {
+            score: score,
+            label: getPoliticalLabel(score),
+            explanation: `Political analysis based on GDELT tone analysis`,
+            source: 'gdelt'
+          };
+        }
+      }
+    } catch (e) {
+      console.log('GDELT API not available, using fallback');
+    }
+    
+    // Final fallback: Use local heuristics
+    const localBias = analyzeBiasHeuristics(text);
+    return {
+      score: localBias.score,
+      label: getPoliticalLabel(localBias.score),
+      explanation: `Political analysis based on local heuristics`,
+      source: 'heuristic'
+    };
+    
+  } catch (error) {
+    console.error('Error in GDELT analysis:', error);
+    // Fallback to heuristics
+    const localBias = analyzeBiasHeuristics(text);
+    return {
+      score: localBias.score,
+      label: getPoliticalLabel(localBias.score),
+      explanation: `Analysis based on local heuristics (GDELT unavailable)`,
+      source: 'heuristic'
+    };
   }
 }
 
@@ -952,7 +627,7 @@ async function fetchOpposingArticles(text, metadata, currentBiasScore) {
     
   } catch (error) {
     console.error('Error fetching opposing articles:', error);
-    // Return search link as fallback
+    // Return-to-search link as fallback
     return [
       {
         title: 'Search for opposing viewpoints',
@@ -997,6 +672,20 @@ function generateSearchQueries(text, metadata) {
  * Main function to analyze an article
  */
 async function analyzeArticle(articleData) {
+  // Add a check for articleData itself
+  if (!articleData || typeof articleData.text === 'undefined' || typeof articleData.metadata === 'undefined') {
+    return {
+      metadata: { title: 'Error', domain: '', author: '' },
+      neutralSummary: 'Failed to analyze: Article data was missing or invalid.',
+      opposingViewpoint: 'Failed to analyze: Article data was missing or invalid.',
+      bias: { score: 0, label: 'Error', explanation: 'No data', source: 'none' },
+      emotionalCharge: { score: 0, label: 'Error', intensity: 0 },
+      opposingArticles: [],
+      timestamp: Date.now(),
+      error: 'Article data was missing or invalid. Please refresh the page.'
+    };
+  }
+
   const { text, metadata } = articleData;
   
   // Check cache first
@@ -1006,96 +695,80 @@ async function analyzeArticle(articleData) {
     return cached;
   }
 
-  // Initialize analysis result
-  const analysis = {
-    metadata: metadata,
-    timestamp: Date.now(),
-    errors: []
-  };
-
-  // Run GDELT and VADER analyses INDEPENDENTLY
-  // They should not block each other
+  // Quick local bias analysis (fallback)
+  const localBias = analyzeBiasHeuristics(text);
   
-  // 1. GDELT Political Analysis (independent)
-  let politicalBias = null;
   try {
-    politicalBias = await analyzeBiasGDELT(text, metadata);
-    analysis.bias = {
-      score: politicalBias.score,
-      label: politicalBias.label,
-      explanation: politicalBias.explanation,
-      source: politicalBias.source || 'multi-vector',
-      success: true
-    };
-  } catch (error) {
-    console.error('GDELT analysis failed:', error);
-    analysis.bias = {
-      score: null,
-      label: 'Analysis Failed',
-      explanation: `Political analysis could not be completed: ${error.message}`,
-      source: 'error',
-      success: false,
-      error: error.message
-    };
-    analysis.errors.push(`Political Analysis: ${error.message}`);
-  }
-
-  // 2. VADER Emotional Analysis (independent)
-  let emotionalCharge = null;
-  try {
-    emotionalCharge = analyzeEmotionalCharge(text);
-    analysis.emotionalCharge = {
-      score: emotionalCharge.score,
-      label: emotionalCharge.label,
-      intensity: emotionalCharge.intensity,
-      success: true
-    };
-  } catch (error) {
-    console.error('VADER analysis failed:', error);
-    analysis.emotionalCharge = {
-      score: null,
-      label: 'Analysis Failed',
-      intensity: null,
-      success: false,
-      error: error.message
-    };
-    analysis.errors.push(`Emotional Analysis: ${error.message}`);
-  }
-
-  // 3. Generate summaries (these can fail independently too)
-  try {
+    // Analyze political bias with GDELT
+    const politicalBias = await analyzeBiasGDELT(text, metadata);
+    
+    // Analyze emotional charge with VADER
+    const emotionalCharge = analyzeEmotionalCharge(text);
+    
+    // Generate summaries in parallel
     const [neutralSummary, opposingViewpoint] = await Promise.all([
       generateNeutralSummary(text),
       generateOpposingViewpoint(text)
     ]);
-    analysis.neutralSummary = neutralSummary;
-    analysis.opposingViewpoint = opposingViewpoint;
+
+    // Fetch actual opposing articles
+    const opposingArticles = await fetchOpposingArticles(text, metadata, politicalBias.score);
+
+    const analysis = {
+      metadata: metadata,
+      neutralSummary: neutralSummary,
+      opposingViewpoint: opposingViewpoint,
+      bias: {
+        score: politicalBias.score,
+        label: politicalBias.label,
+        explanation: politicalBias.explanation,
+        source: politicalBias.source || 'gdelt'
+      },
+      emotionalCharge: {
+        score: emotionalCharge.score,
+        label: emotionalCharge.label,
+        intensity: emotionalCharge.intensity
+      },
+      opposingArticles: opposingArticles,
+      timestamp: Date.now()
+    };
+
+    // Cache the analysis
+    await setCachedAnalysis(metadata.url, analysis);
+
+    return analysis;
   } catch (error) {
-    console.error('Summary generation failed:', error);
-    analysis.neutralSummary = 'Unable to generate summary. Please check your API key configuration.';
-    analysis.opposingViewpoint = 'Unable to generate opposing viewpoint. Please check your API key configuration.';
-    analysis.errors.push(`Summary Generation: ${error.message}`);
+    console.error('EchoAI: Error analyzing article:', error);
+    
+    // Return partial analysis with local bias if API fails
+    return {
+      metadata: metadata,
+      neutralSummary: 'Unable to generate summary. Please check your API key configuration.',
+      opposingViewpoint: 'Unable to generate opposing viewpoint. Please check your API key configuration.',
+      bias: {
+        score: localBias.score,
+        label: getPoliticalLabel(localBias.score),
+        explanation: 'Analysis based on local heuristics only.',
+        source: 'heuristic'
+      },
+      emotionalCharge: {
+        score: analyzeEmotionalCharge(text).score,
+        label: analyzeEmotionalCharge(text).label,
+        intensity: analyzeEmotionalCharge(text).intensity
+      },
+      opposingArticles: await fetchOpposingArticles(text, metadata, localBias.score),
+      timestamp: Date.now(),
+      error: error.message // This is where the error message comes from
+    };
   }
-
-  // 4. Fetch opposing articles (use political bias score if available)
-  try {
-    const biasScore = politicalBias ? politicalBias.score : 0;
-    analysis.opposingArticles = await fetchOpposingArticles(text, metadata, biasScore);
-  } catch (error) {
-    console.error('Opposing articles fetch failed:', error);
-    analysis.opposingArticles = [];
-    analysis.errors.push(`Opposing Articles: ${error.message}`);
-  }
-
-  // Cache the analysis (even if it has errors)
-  await setCachedAnalysis(metadata.url, analysis);
-
-  return analysis;
 }
 
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ANALYZE_ARTICLE') {
+    // *** DEBUGGING LINE ADDED ***
+    console.log('Received data to analyze:', message.data);
+    
     analyzeArticle(message.data)
       .then(analysis => {
         sendResponse({ success: true, analysis: analysis });
@@ -1107,16 +780,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.type === 'SET_API_KEY') {
-    geminiApiKey = message.apiKey;
     chrome.storage.local.set({ geminiApiKey: message.apiKey }, () => {
       sendResponse({ success: true });
     });
     return true;
   }
   
+  if (message.type === 'TEST_API_KEY') {
+    testApiKey(message.apiKey)
+      .then(result => {
+        sendResponse(result);
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async response
+  }
+  
   if (message.type === 'GET_API_KEY') {
-    sendResponse({ apiKey: geminiApiKey });
-    return false;
+    getApiKey()
+      .then(key => {
+        sendResponse({ apiKey: key });
+      })
+      .catch(error => {
+        sendResponse({ apiKey: null, error: error.message });
+      });
+    return true; // Keep channel open for async response
   }
   
   if (message.type === 'CLEAR_CACHE') {
@@ -1146,4 +835,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
-
