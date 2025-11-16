@@ -146,7 +146,7 @@ async function getApiKey() {
 /**
  * Calls Gemini API to generate content
  */
-async function callGeminiAPI(prompt, maxTokens = 1000) {
+async function callGeminiAPI(prompt, maxTokens = 2000) {
   const geminiApiKey = await getApiKey();
   
   if (!geminiApiKey) {
