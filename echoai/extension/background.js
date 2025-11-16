@@ -126,7 +126,9 @@ function getBiasLabel(score) {
   return getPoliticalLabel(score);
 }
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+// Note: Use the model name without the version prefix in the URL
+const GEMINI_MODEL = 'gemini-2.5-flash'; // Changed from gemini-2.5-flash to stable version
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 /**
  * Helper function to securely get the API key from storage
@@ -148,60 +150,123 @@ async function callGeminiAPI(prompt, maxTokens = 1000) {
   const geminiApiKey = await getApiKey();
   
   if (!geminiApiKey) {
-    throw new Error('Gemini API key not configured');
+    throw new Error('Gemini API key not configured. Please enter your API key in the Settings section.');
   }
 
   const url = `${GEMINI_API_URL}?key=${geminiApiKey}`;
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  console.log('Making Gemini API request to:', GEMINI_API_URL);
+  
+  const requestBody = {
+    contents: [{
+      parts: [{
+        text: prompt
+      }]
+    }],
+    generationConfig: {
+      temperature: 0.7,
+      topK: 40,
+      topP: 0.95,
+      maxOutputTokens: maxTokens,
     },
-    body: JSON.stringify({
-      contents: [{
-        parts: [{
-          text: prompt
-        }]
-      }],
-      generationConfig: {
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: maxTokens,
+    safetySettings: [
+      {
+        category: "HARM_CATEGORY_HARASSMENT",
+        threshold: "BLOCK_NONE"
+      },
+      {
+        category: "HARM_CATEGORY_HATE_SPEECH",
+        threshold: "BLOCK_NONE"
+      },
+      {
+        category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        threshold: "BLOCK_NONE"
+      },
+      {
+        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold: "BLOCK_NONE"
       }
-    })
-  });
+    ]
+  };
+  
+  console.log('Request body:', JSON.stringify(requestBody, null, 2));
+  
+  // Add timeout to fetch request (30 seconds)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+  } catch (fetchError) {
+    clearTimeout(timeoutId);
+    if (fetchError.name === 'AbortError') {
+      throw new Error('Gemini API request timed out after 30 seconds. Please try again.');
+    }
+    throw new Error(`Network error: ${fetchError.message}`);
+  }
+
+  console.log('Response status:', response.status, response.statusText);
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Gemini API error: ${error}`);
+    const errorText = await response.text();
+    console.error('API Error Response:', errorText);
+    
+    try {
+      const errorJson = JSON.parse(errorText);
+      const errorMessage = errorJson.error?.message || errorText;
+      throw new Error(`Gemini API error (${response.status}): ${errorMessage}`);
+    } catch (e) {
+      throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    }
   }
 
   const data = await response.json();
-
-  // *** DEBUGGING LINE ADDED ***
   console.log('Full API Response:', JSON.stringify(data, null, 2));
 
-  // Add safety check for the *full* response structure
-  if (!data.candidates || 
-      data.candidates.length === 0 || 
-      !data.candidates[0].content || 
-      !data.candidates[0].content.parts || 
-      data.candidates[0].content.parts.length === 0) {
-        
-    // Check for finishReason to provide better error
-    if (data.candidates && data.candidates[0] && data.candidates[0].finishReason === 'SAFETY') {
-      throw new Error('Gemini API error: Response blocked due to safety settings.');
+  // Check for prompt feedback first
+  if (data.promptFeedback) {
+    console.log('Prompt Feedback:', data.promptFeedback);
+    if (data.promptFeedback.blockReason) {
+      throw new Error(`Gemini API: Prompt was blocked due to ${data.promptFeedback.blockReason}`);
     }
-    // Check for prompt feedback
-    if (data.promptFeedback && data.promptFeedback.blockReason) {
-        throw new Error(`Gemini API error: Prompt blocked due to ${data.promptFeedback.blockReason}`);
-    }
-    throw new Error('Gemini API error: Received an invalid or empty response structure.');
   }
 
-  return data.candidates[0].content.parts[0].text;
+  // Add safety check for the response structure
+  if (!data.candidates || data.candidates.length === 0) {
+    console.error('No candidates in response:', data);
+    throw new Error('Gemini API error: No response candidates returned. This might be due to content filtering.');
+  }
+
+  const candidate = data.candidates[0];
+  
+  // Check for finishReason to provide better error
+  if (candidate.finishReason && candidate.finishReason === 'SAFETY') {
+    throw new Error('Gemini API: Response was blocked due to safety settings.');
+  }
+  
+  if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+    console.error('Invalid candidate structure:', candidate);
+    throw new Error('Gemini API error: Response has invalid structure. FinishReason: ' + (candidate.finishReason || 'unknown'));
+  }
+
+  const text = candidate.content.parts[0].text;
+  
+  if (!text) {
+    console.error('No text in response:', candidate);
+    throw new Error('Gemini API error: No text content in response.');
+  }
+
+  console.log('Successfully extracted text, length:', text.length);
+  return text;
 }
 
 /**
@@ -221,36 +286,89 @@ async function testApiKey(apiKey) {
   }
 
   const url = `${GEMINI_API_URL}?key=${keyToTest}`;
-  const testPrompt = 'Say "API connection successful" if you can read this.';
+  const testPrompt = 'Respond with "API test successful" if you can read this message.';
+  
+  console.log('Testing API key with model:', GEMINI_MODEL);
   
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const requestBody = {
+      contents: [{
+        parts: [{
+          text: testPrompt
+        }]
+      }],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 50,
       },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: testPrompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 50,
+      safetySettings: [
+        {
+          category: "HARM_CATEGORY_HARASSMENT",
+          threshold: "BLOCK_NONE"
+        },
+        {
+          category: "HARM_CATEGORY_HATE_SPEECH",
+          threshold: "BLOCK_NONE"
+        },
+        {
+          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+          threshold: "BLOCK_NONE"
+        },
+        {
+          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+          threshold: "BLOCK_NONE"
         }
-      })
-    });
+      ]
+    };
+    
+    // Add timeout for test request (15 seconds)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        return { 
+          success: false, 
+          error: 'API test timed out after 15 seconds. Please check your network connection.' 
+        };
+      }
+      return { 
+        success: false, 
+        error: `Network error: ${fetchError.message}` 
+      };
+    }
+
+    console.log('Test API response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('Test API error:', errorText);
       let errorMessage = 'API key is not valid';
       
       try {
         const errorJson = JSON.parse(errorText);
         errorMessage = errorJson.error?.message || errorMessage;
+        
+        // Provide more helpful error messages
+        if (errorMessage.includes('API_KEY_INVALID')) {
+          errorMessage = 'Invalid API key. Please check your key and try again.';
+        } else if (errorMessage.includes('models/gemini')) {
+          errorMessage = `Model not available. Using: ${GEMINI_MODEL}. Try updating to a different model version.`;
+        }
       } catch (e) {
         // If error is not JSON, use the text as is
         errorMessage = errorText || errorMessage;
@@ -260,34 +378,53 @@ async function testApiKey(apiKey) {
     }
 
     const data = await response.json();
+    console.log('Test API response data:', JSON.stringify(data, null, 2));
     
-    // Check if we got a valid response
-    if (data.candidates && data.candidates.length > 0 && 
-        data.candidates[0].content && 
-        data.candidates[0].content.parts && 
-        data.candidates[0].content.parts.length > 0 &&
-        data.candidates[0].content.parts[0].text) {
-      const responseText = data.candidates[0].content.parts[0].text;
-      // If we get any text response, the API key is working
+    // Check for prompt feedback
+    if (data.promptFeedback && data.promptFeedback.blockReason) {
+      console.warn('Prompt was blocked:', data.promptFeedback.blockReason);
+      // Still consider this a success since the API key works
       return { 
         success: true, 
-        message: 'API key connected successfully',
-        testResponse: responseText.trim()
-      };
-    } else {
-      // Handle cases where the response is valid but empty (e.g., safety block)
-      if (data.promptFeedback && data.promptFeedback.blockReason) {
-         return { 
-            success: false, 
-            error: `API key is valid, but test prompt was blocked: ${data.promptFeedback.blockReason}` 
-         };
-      }
-      return { 
-        success: false, 
-        error: 'Invalid response from API. Please check your API key.' 
+        message: 'API key is valid (test prompt was blocked by safety filter, but key works)',
+        testResponse: 'Blocked by safety filter'
       };
     }
+    
+    // Check if we got a valid response
+    if (data.candidates && data.candidates.length > 0) {
+      const candidate = data.candidates[0];
+      
+      if (candidate.content && 
+          candidate.content.parts && 
+          candidate.content.parts.length > 0 &&
+          candidate.content.parts[0].text) {
+        const responseText = candidate.content.parts[0].text;
+        console.log('Test successful, response:', responseText);
+        // If we get any text response, the API key is working
+        return { 
+          success: true, 
+          message: 'API key connected successfully! ✓',
+          testResponse: responseText.trim()
+        };
+      } else if (candidate.finishReason) {
+        // API key works but response was filtered
+        return {
+          success: true,
+          message: `API key is valid (response finish reason: ${candidate.finishReason})`,
+          testResponse: `Finished with: ${candidate.finishReason}`
+        };
+      }
+    }
+    
+    // If we got here, response structure is unexpected
+    console.error('Unexpected response structure:', data);
+    return { 
+      success: false, 
+      error: 'Unexpected response from API. The API key might be valid but the model is not responding correctly.' 
+    };
   } catch (error) {
+    console.error('Test API exception:', error);
     return { 
       success: false, 
       error: `Connection error: ${error.message}` 

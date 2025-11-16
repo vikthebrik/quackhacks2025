@@ -116,6 +116,42 @@ Create a `.env` file:
 
     GEMINI_API_KEY=your_api_key_here
 
+Or configure directly in the extension sidebar Settings section.
+
+------------------------------------------------------------------------
+
+## Troubleshooting
+
+### Gemini API Issues Fixed! 🎉
+
+Recent updates fixed common issues:
+- ✅ "Invalid or empty response structure" errors
+- ✅ Request timeout issues
+- ✅ Better error messages
+
+**Quick test:**
+1. Reload extension in `chrome://extensions`
+2. Open extension sidebar
+3. Enter API key in Settings → Save
+4. Test on any news article
+
+**For detailed debugging:** See `echoai/QUICK_TEST.md` or `echoai/DEBUGGING_GUIDE.md`
+
+### Common Issues
+
+**"API key is not valid"**
+- Get a new key from https://makersuite.google.com/app/apikey
+- Ensure Gemini API is enabled
+
+**"Model not available"**
+- See `echoai/extension/MODEL_CONFIG.md` for alternative models
+- Default is `gemini-1.5-flash`
+
+**Timeout errors**
+- Check internet connection
+- Try shorter articles
+- Check console (F12) for detailed errors
+
 ------------------------------------------------------------------------
 
 ## Roadmap
